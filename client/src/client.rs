@@ -1076,6 +1076,7 @@ pub trait RpcApi: Sized {
     }
     
     /// Place a raw transaction into the nodes mempool
+    /// Result will be the TXID of the submitted hex
     fn send_raw_transaction<R: RawTx>(
         &self, 
         tx: R,
