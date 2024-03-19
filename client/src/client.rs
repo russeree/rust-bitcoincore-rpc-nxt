@@ -1093,7 +1093,7 @@ pub trait RpcApi: Sized {
             "sendrawtransaction",
             handle_defaults(
                     &mut args,
-                    &["".into(), "".into(), false.into()],
+                    &["0".into(), "0".into(), false.into()],
             ),
         )
     }
