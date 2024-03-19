@@ -1080,7 +1080,7 @@ pub trait RpcApi: Sized {
         &self, 
         tx: R,
         max_fee_rate: Option<f64>,
-        max_burn_amount: Option<Amount>,
+        max_burn_amount: Option<f64>,
         broadcast: Option<bool>
     ) -> Result<bitcoin::Txid> {
         let mut args = [
