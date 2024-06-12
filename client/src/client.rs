@@ -10,12 +10,14 @@
 
 use std::collections::HashMap;
 use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::iter::FromIterator;
 use std::path::PathBuf;
 use std::{fmt, result};
 
-use crate::{bitcoin, deserialize_hex};
-use bitcoin_private::hex::exts::DisplayHex;
+use crate::bitcoin;
+use crate::bitcoin::consensus::encode;
+use bitcoin::hex::DisplayHex;
 use jsonrpc;
 use serde;
 use serde_json;
@@ -162,7 +164,7 @@ pub trait RawTx: Sized + Clone {
 
 impl<'a> RawTx for &'a Transaction {
     fn raw_hex(self) -> String {
-        bitcoin::consensus::encode::serialize_hex(self)
+        encode::serialize_hex(self)
     }
 }
 
@@ -201,19 +203,16 @@ pub enum Auth {
 impl Auth {
     /// Convert into the arguments that jsonrpc::Client needs.
     pub fn get_user_pass(self) -> Result<(Option<String>, Option<String>)> {
-        use std::io::Read;
         match self {
             Auth::None => Ok((None, None)),
             Auth::UserPass(u, p) => Ok((Some(u), Some(p))),
             Auth::CookieFile(path) => {
-                let mut file = File::open(path)?;
-                let mut contents = String::new();
-                file.read_to_string(&mut contents)?;
-                let mut split = contents.splitn(2, ":");
-                Ok((
-                    Some(split.next().ok_or(Error::InvalidCookieFile)?.into()),
-                    Some(split.next().ok_or(Error::InvalidCookieFile)?.into()),
-                ))
+                let line = BufReader::new(File::open(path)?)
+                    .lines()
+                    .next()
+                    .ok_or(Error::InvalidCookieFile)??;
+                let colon = line.find(':').ok_or(Error::InvalidCookieFile)?;
+                Ok((Some(line[..colon].into()), Some(line[colon + 1..].into())))
             }
         }
     }
@@ -335,7 +334,7 @@ pub trait RpcApi: Sized {
 
     fn get_block(&self, hash: &bitcoin::BlockHash) -> Result<Block> {
         let hex: String = self.call("getblock", &[into_json(hash)?, 0.into()])?;
-        deserialize_hex(&hex)
+        Ok(encode::deserialize_hex(&hex)?)
     }
 
     fn get_block_hex(&self, hash: &bitcoin::BlockHash) -> Result<String> {
@@ -352,7 +351,7 @@ pub trait RpcApi: Sized {
 
     fn get_block_header(&self, hash: &bitcoin::BlockHash) -> Result<bitcoin::block::Header> {
         let hex: String = self.call("getblockheader", &[into_json(hash)?, false.into()])?;
-        deserialize_hex(&hex)
+        Ok(encode::deserialize_hex(&hex)?)
     }
 
     fn get_block_header_info(
@@ -496,7 +495,7 @@ pub trait RpcApi: Sized {
     ) -> Result<Transaction> {
         let mut args = [into_json(txid)?, into_json(false)?, opt_into_json(block_hash)?];
         let hex: String = self.call("getrawtransaction", handle_defaults(&mut args, &[null()]))?;
-        deserialize_hex(&hex)
+        Ok(encode::deserialize_hex(&hex)?)
     }
 
     fn get_raw_transaction_hex(
@@ -793,7 +792,7 @@ pub trait RpcApi: Sized {
         replaceable: Option<bool>,
     ) -> Result<Transaction> {
         let hex: String = self.create_raw_transaction_hex(utxos, outs, locktime, replaceable)?;
-        deserialize_hex(&hex)
+        Ok(encode::deserialize_hex(&hex)?)
     }
 
     fn decode_raw_transaction<R: RawTx>(
@@ -1082,9 +1081,40 @@ pub trait RpcApi: Sized {
     fn ping(&self) -> Result<()> {
         self.call("ping", &[])
     }
+    
+    /// Place a raw transaction into the nodes mempool
+    /// Result will be the TXID of the submitted hex
+    fn send_raw_transaction<R: RawTx>(
+        &self, 
+        tx: R,
+        max_fee_rate: Option<f64>,
+        max_burn_amount: Option<f64>,
+        broadcast: Option<bool>
+    ) -> Result<bitcoin::Txid> {
+        let mut args = [
+            tx.raw_hex().into(),
+            opt_into_json(max_fee_rate)?,
+            opt_into_json(max_burn_amount)?,
+            opt_into_json(broadcast)?,
+        ];
+        self.call(
+            "sendrawtransaction",
+            handle_defaults(
+                    &mut args,
+                    &["".into(), "".into(), false.into()],
+            ),
+        )
+    }
 
-    fn send_raw_transaction<R: RawTx>(&self, tx: R) -> Result<bitcoin::Txid> {
-        self.call("sendrawtransaction", &[tx.raw_hex().into()])
+    /// Submit a package of raw transactions to the node. The package will be
+    /// validated according to consensus and mempool policy rules. If all
+    /// transactions pass, they will be accepted to mempool.
+    /// 
+    /// This RPC is experimental and the interface may be unstable.
+    fn submit_package<R: RawTx>(&self, rawtxs: &[R]) -> Result<json::SubmitPackageResult> {
+        let hexes: Vec<serde_json::Value> =
+            rawtxs.to_vec().into_iter().map(|r| r.raw_hex().into()).collect();
+        self.call("submitpackage", &[hexes.into()])
     }
 
     fn estimate_smart_fee(
@@ -1273,6 +1303,11 @@ pub trait RpcApi: Sized {
     ) -> Result<json::ScanTxOutResult> {
         self.call("scantxoutset", &["start".into(), into_json(descriptors)?])
     }
+
+    /// Returns information about the active ZeroMQ notifications
+    fn get_zmq_notifications(&self) -> Result<Vec<json::GetZmqNotificationsResult>> {
+        self.call("getzmqnotifications", &[])
+    }
 }
 
 /// Client implements a JSON-RPC client for the Bitcoin Core daemon or compatible APIs.
@@ -1319,15 +1354,8 @@ impl RpcApi for Client {
         cmd: &str,
         args: &[serde_json::Value],
     ) -> Result<T> {
-        let raw_args: Vec<_> = args
-            .iter()
-            .map(|a| {
-                let json_string = serde_json::to_string(a)?;
-                serde_json::value::RawValue::from_string(json_string) // we can't use to_raw_value here due to compat with Rust 1.29
-            })
-            .map(|a| a.map_err(|e| Error::Json(e)))
-            .collect::<Result<Vec<_>>>()?;
-        let req = self.client.build_request(&cmd, &raw_args);
+        let raw = serde_json::value::to_raw_value(args)?;
+        let req = self.client.build_request(&cmd, Some(&*raw));
         if log_enabled!(Debug) {
             debug!(target: "bitcoincore_rpc", "JSON-RPC request: {} {}", cmd, serde_json::Value::from(args));
         }
@@ -1352,11 +1380,7 @@ fn log_response(cmd: &str, resp: &Result<jsonrpc::Response>) {
                         debug!(target: "bitcoincore_rpc", "JSON-RPC error for {}: {:?}", cmd, e);
                     }
                 } else if log_enabled!(Trace) {
-                    // we can't use to_raw_value here due to compat with Rust 1.29
-                    let def = serde_json::value::RawValue::from_string(
-                        serde_json::Value::Null.to_string(),
-                    )
-                    .unwrap();
+                    let def = serde_json::value::to_raw_value(&serde_json::value::Value::Null).unwrap();
                     let result = resp.result.as_ref().unwrap_or(&def);
                     trace!(target: "bitcoincore_rpc", "JSON-RPC response for {}: {}", cmd, result);
                 }
@@ -1377,10 +1401,10 @@ mod tests {
         let client = Client::new("http://localhost/".into(), Auth::None).unwrap();
         let tx: bitcoin::Transaction = encode::deserialize(&Vec::<u8>::from_hex("0200000001586bd02815cf5faabfec986a4e50d25dbee089bd2758621e61c5fab06c334af0000000006b483045022100e85425f6d7c589972ee061413bcf08dc8c8e589ce37b217535a42af924f0e4d602205c9ba9cb14ef15513c9d946fa1c4b797883e748e8c32171bdf6166583946e35c012103dae30a4d7870cd87b45dd53e6012f71318fdd059c1c2623b8cc73f8af287bb2dfeffffff021dc4260c010000001976a914f602e88b2b5901d8aab15ebe4a97cf92ec6e03b388ac00e1f505000000001976a914687ffeffe8cf4e4c038da46a9b1d37db385a472d88acfd211500").unwrap()).unwrap();
 
-        assert!(client.send_raw_transaction(&tx).is_err());
-        assert!(client.send_raw_transaction(&encode::serialize(&tx)).is_err());
-        assert!(client.send_raw_transaction("deadbeef").is_err());
-        assert!(client.send_raw_transaction("deadbeef".to_owned()).is_err());
+        assert!(client.send_raw_transaction(&tx, None, None, None).is_err());
+        assert!(client.send_raw_transaction(&encode::serialize(&tx), None, None, None).is_err());
+        assert!(client.send_raw_transaction("deadbeef", None, None, None).is_err());
+        assert!(client.send_raw_transaction("deadbeef".to_owned(), None, None, None).is_err());
     }
 
     fn test_handle_defaults_inner() -> Result<()> {
@@ -1438,5 +1462,35 @@ mod tests {
     #[test]
     fn test_handle_defaults() {
         test_handle_defaults_inner().unwrap();
+    }
+
+    #[test]
+    fn auth_cookie_file_ignores_newline() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("cookie");
+        std::fs::write(&path, "foo:bar\n").unwrap();
+        assert_eq!(
+            Auth::CookieFile(path).get_user_pass().unwrap(),
+            (Some("foo".into()), Some("bar".into())),
+        );
+    }
+
+    #[test]
+    fn auth_cookie_file_ignores_additional_lines() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("cookie");
+        std::fs::write(&path, "foo:bar\nbaz").unwrap();
+        assert_eq!(
+            Auth::CookieFile(path).get_user_pass().unwrap(),
+            (Some("foo".into()), Some("bar".into())),
+        );
+    }
+
+    #[test]
+    fn auth_cookie_file_fails_if_colon_isnt_present() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("cookie");
+        std::fs::write(&path, "foobar").unwrap();
+        assert!(matches!(Auth::CookieFile(path).get_user_pass(), Err(Error::InvalidCookieFile)));
     }
 }

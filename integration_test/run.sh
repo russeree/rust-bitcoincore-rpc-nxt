@@ -34,7 +34,9 @@ bitcoind -regtest $BLOCKFILTERARG $FALLBACKFEEARG \
     -rpcport=12349 \
     -server=1 \
     -txindex=1 \
-    -printtoconsole=0 &
+    -printtoconsole=0 \
+    -zmqpubrawblock=tcp://0.0.0.0:28332 \
+    -zmqpubrawtx=tcp://0.0.0.0:28333 &
 PID2=$!
 
 # Let it connect to the other node.
@@ -42,6 +44,7 @@ sleep 5
 
 RPC_URL=http://localhost:12349 \
     RPC_COOKIE=${TESTDIR}/2/regtest/.cookie \
+    TESTDIR=${TESTDIR} \
     cargo run
 
 RESULT=$?

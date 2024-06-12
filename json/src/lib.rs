@@ -15,6 +15,7 @@
 
 #![crate_name = "bitcoincore_rpc_json"]
 #![crate_type = "rlib"]
+#![allow(deprecated)]           // Because of `GetPeerInfoResultNetwork::Unroutable`.
 
 pub extern crate bitcoin;
 #[allow(unused)]
@@ -24,6 +25,7 @@ extern crate serde_json;
 
 use std::collections::HashMap;
 
+
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::block::Version;
 use bitcoin::consensus::encode;
@@ -31,7 +33,7 @@ use bitcoin::hashes::hex::FromHex;
 use bitcoin::hashes::sha256;
 use bitcoin::{
     bip158, bip32, Address, Amount, PrivateKey, PublicKey, Script, ScriptBuf, SignedAmount,
-    Transaction,
+    Transaction, Network,
 };
 use serde::de::Error as SerdeError;
 use serde::{Deserialize, Serialize};
@@ -43,8 +45,7 @@ use std::fmt;
 ///
 /// The module is compatible with the serde attribute.
 pub mod serde_hex {
-    use bitcoin::hashes::hex::FromHex;
-    use bitcoin_private::hex::exts::DisplayHex;
+    use bitcoin::hex::{DisplayHex, FromHex};
     use serde::de::Error;
     use serde::{Deserializer, Serializer};
 
@@ -58,8 +59,7 @@ pub mod serde_hex {
     }
 
     pub mod opt {
-        use bitcoin::hashes::hex::FromHex;
-        use bitcoin_private::hex::exts::DisplayHex;
+        use bitcoin::hex::{DisplayHex, FromHex};
         use serde::de::Error;
         use serde::{Deserializer, Serializer};
 
@@ -121,7 +121,7 @@ pub struct GetNetworkInfoResult {
     pub incremental_fee: Amount,
     #[serde(rename = "localaddresses")]
     pub local_addresses: Vec<GetNetworkInfoResultAddress>,
-    pub warnings: String,
+    pub warnings: StringOrStringArray,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
@@ -176,7 +176,7 @@ pub struct GetWalletInfoResult {
     #[serde(rename = "paytxfee", with = "bitcoin::amount::serde::as_btc")]
     pub pay_tx_fee: Amount,
     #[serde(rename = "hdseedid")]
-    pub hd_seed_id: Option<bitcoin::hash_types::XpubIdentifier>,
+    pub hd_seed_id: Option<bitcoin::bip32::XKeyIdentifier>,
     pub private_keys_enabled: bool,
     pub avoid_reuse: Option<bool>,
     pub scanning: Option<ScanningDetails>,
@@ -518,8 +518,9 @@ pub struct GetMiningInfoResult {
     pub network_hash_ps: f64,
     #[serde(rename = "pooledtx")]
     pub pooled_tx: usize,
-    pub chain: String,
-    pub warnings: String,
+    #[serde(deserialize_with = "deserialize_bip70_network")]
+    pub chain: Network,
+    pub warnings: StringOrStringArray,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
@@ -670,7 +671,7 @@ pub enum GetTransactionResultDetailCategory {
     Orphan,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct GetTransactionResultDetail {
     pub address: Option<Address<NetworkUnchecked>>,
     pub category: GetTransactionResultDetailCategory,
@@ -683,7 +684,7 @@ pub struct GetTransactionResultDetail {
     pub abandoned: Option<bool>,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct WalletTxInfo {
     pub confirmations: i32,
     pub blockhash: Option<bitcoin::BlockHash>,
@@ -700,7 +701,7 @@ pub struct WalletTxInfo {
     pub wallet_conflicts: Vec<bitcoin::Txid>,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct GetTransactionResult {
     #[serde(flatten)]
     pub info: WalletTxInfo,
@@ -719,7 +720,7 @@ impl GetTransactionResult {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct ListTransactionResult {
     #[serde(flatten)]
     pub info: WalletTxInfo,
@@ -730,7 +731,7 @@ pub struct ListTransactionResult {
     pub comment: Option<String>,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct ListSinceBlockResult {
     pub transactions: Vec<ListTransactionResult>,
     #[serde(default)]
@@ -847,6 +848,51 @@ pub struct TestMempoolAcceptResult {
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct Fees {
+    /// Transaction fee.
+    #[serde(with = "bitcoin::amount::serde::as_btc")]
+    pub base: Amount,
+
+    /// If the transaction was not already in the mempool, the effective feerate
+    /// in BTC per KvB. For example, the package feerate and/or feerate with
+    /// modified fees from prioritisetransaction.
+    #[serde(default, rename = "effective-feerate", with = "bitcoin::amount::serde::as_btc::opt")]
+    pub effective_feerate: Option<Amount>,
+
+    /// If effective-feerate is provided, the wtxids of the transactions whose
+    /// fees and vsizes are included in effective-feerate.
+    #[serde(rename = "effective-includes")]
+    pub effective_includes: Option<Vec<bitcoin::Wtxid>>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct TxResult {
+    pub txid: bitcoin::Txid,
+
+    /// The wtxid of a different transaction with the same txid but different
+    /// witness found in the mempool. This means the submitted transaction was
+    /// ignored.
+    #[serde(rename = "other-wtxid")]
+    pub other_wtxid: Option<bitcoin::Wtxid>,
+
+    /// Virtual transaction size as defined in BIP 141.
+    pub vsize: u64,
+
+    pub fees: Fees,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct SubmitPackageResult {
+    /// Transaction results keyed by wtxid.
+    #[serde(rename = "tx-results")]
+    pub tx_results: HashMap<bitcoin::Wtxid, TxResult>,
+
+    /// List of txids of replaced transactions.
+    #[serde(rename = "replaced-transactions")]
+    pub replaced_transactions: Vec<bitcoin::Txid>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct TestMempoolAcceptResultFees {
     /// Transaction fee in BTC
     #[serde(with = "bitcoin::amount::serde::as_btc")]
@@ -945,7 +991,7 @@ pub struct GetAddressInfoResultEmbedded {
     #[serde(rename = "hdkeypath")]
     pub hd_key_path: Option<bip32::DerivationPath>,
     #[serde(rename = "hdseedid")]
-    pub hd_seed_id: Option<bitcoin::hash_types::XpubIdentifier>,
+    pub hd_seed_id: Option<bitcoin::bip32::XKeyIdentifier>,
     #[serde(default)]
     pub labels: Vec<GetAddressInfoResultLabel>,
 }
@@ -999,18 +1045,27 @@ pub struct GetAddressInfoResult {
     #[serde(rename = "hdkeypath")]
     pub hd_key_path: Option<bip32::DerivationPath>,
     #[serde(rename = "hdseedid")]
-    pub hd_seed_id: Option<bitcoin::hash_types::XpubIdentifier>,
+    pub hd_seed_id: Option<bitcoin::bip32::XKeyIdentifier>,
     pub labels: Vec<GetAddressInfoResultLabel>,
     /// Deprecated in v0.20.0. See `labels` field instead.
     #[deprecated(note = "since Core v0.20.0")]
     pub label: Option<String>,
 }
 
+/// Used to represent values that can either be a string or a string array.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum StringOrStringArray {
+	String(String),
+	StringArray(Vec<String>),
+}
+
 /// Models the result of "getblockchaininfo"
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct GetBlockchainInfoResult {
-    /// Current network name as defined in BIP70 (main, test, regtest)
-    pub chain: String,
+    /// Current network name as defined in BIP70 (main, test, signet, regtest)
+    #[serde(deserialize_with = "deserialize_bip70_network")]
+    pub chain: Network,
     /// The current number of blocks processed in the server
     pub blocks: u64,
     /// The current number of headers we have validated
@@ -1046,8 +1101,8 @@ pub struct GetBlockchainInfoResult {
     /// Status of softforks in progress
     #[serde(default)]
     pub softforks: HashMap<String, Softfork>,
-    /// Any network and blockchain warnings.
-    pub warnings: String,
+    /// Any network and blockchain warnings. In later versions of bitcoind, it's an array of strings.
+    pub warnings: StringOrStringArray,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -1059,7 +1114,7 @@ pub enum ImportMultiRequestScriptPubkey<'a> {
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct GetMempoolInfoResult {
     /// True if the mempool is fully loaded
-    pub loaded: bool,
+    pub loaded: Option<bool>,
     /// Current tx count
     pub size: usize,
     /// Sum of all virtual transaction sizes as defined in BIP 141. Differs from actual serialized size because witness data is discounted
@@ -1067,8 +1122,8 @@ pub struct GetMempoolInfoResult {
     /// Total memory usage for the mempool
     pub usage: usize,
     /// Total fees for the mempool in BTC, ignoring modified fees through prioritisetransaction
-    #[serde(with = "bitcoin::amount::serde::as_btc")]
-    pub total_fee: Amount,
+    #[serde(default, with = "bitcoin::amount::serde::as_btc::opt")]
+    pub total_fee: Option<Amount>,
     /// Maximum memory usage for the mempool
     #[serde(rename = "maxmempool")]
     pub max_mempool: usize,
@@ -1079,14 +1134,14 @@ pub struct GetMempoolInfoResult {
     #[serde(rename = "minrelaytxfee", with = "bitcoin::amount::serde::as_btc")]
     pub min_relay_tx_fee: Amount,
     /// Minimum fee rate increment for mempool limiting or replacement in BTC/kvB
-    #[serde(rename = "incrementalrelayfee", with = "bitcoin::amount::serde::as_btc")]
-    pub incremental_relay_fee: Amount,
+    #[serde(rename = "incrementalrelayfee", default, with = "bitcoin::amount::serde::as_btc::opt")]
+    pub incremental_relay_fee: Option<Amount>,
     /// Current number of transactions that haven't passed initial broadcast yet
     #[serde(rename = "unbroadcastcount")]
-    pub unbroadcast_count: usize,
+    pub unbroadcast_count: Option<usize>,
     /// True if the mempool accepts RBF without replaceability signaling inspection
     #[serde(rename = "fullrbf")]
-    pub full_rbf: bool,
+    pub full_rbf: Option<bool>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
@@ -1501,7 +1556,7 @@ pub struct BlockRef {
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct GetDescriptorInfoResult {
     pub descriptor: String,
-    pub checksum: String,
+    pub checksum: Option<String>,
     #[serde(rename = "isrange")]
     pub is_range: bool,
     #[serde(rename = "issolvable")]
@@ -1921,7 +1976,7 @@ impl serde::Serialize for SigHashType {
 }
 
 // Used for createrawtransaction argument.
-#[derive(Serialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Clone, PartialEq, Eq, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRawTransactionInput {
     pub txid: bitcoin::Txid,
@@ -1948,6 +2003,13 @@ pub struct FundRawTransactionOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lock_unspents: Option<bool>,
     #[serde(with = "bitcoin::amount::serde::as_btc::opt", skip_serializing_if = "Option::is_none")]
+    /// The fee rate to pay per kvB. NB. This field is converted to camelCase
+    /// when serialized, so it is receeived by fundrawtransaction as `feeRate`,
+    /// which fee rate per kvB, and *not* `fee_rate`, which is per vB.
+    #[serde(
+        with = "bitcoin::amount::serde::as_btc::opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub fee_rate: Option<Amount>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subtract_fee_from_outputs: Option<Vec<u32>>,
@@ -1959,7 +2021,7 @@ pub struct FundRawTransactionOptions {
     pub estimate_mode: Option<EstimateMode>,
 }
 
-#[derive(Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Deserialize, Clone, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FundRawTransactionResult {
     #[serde(with = "crate::serde_hex")]
@@ -1970,7 +2032,7 @@ pub struct FundRawTransactionResult {
     pub change_position: i32,
 }
 
-#[derive(Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Deserialize, Clone, PartialEq, Eq, Debug, Serialize)]
 pub struct GetBalancesResultEntry {
     #[serde(with = "bitcoin::amount::serde::as_btc")]
     pub trusted: Amount,
@@ -1980,7 +2042,7 @@ pub struct GetBalancesResultEntry {
     pub immature: Amount,
 }
 
-#[derive(Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Deserialize, Clone, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetBalancesResult {
     pub mine: GetBalancesResultEntry,
@@ -1994,7 +2056,7 @@ impl FundRawTransactionResult {
 }
 
 // Used for signrawtransaction argument.
-#[derive(Serialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Clone, PartialEq, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignRawTransactionInput {
     pub txid: bitcoin::Txid,
@@ -2011,7 +2073,7 @@ pub struct SignRawTransactionInput {
 }
 
 /// Used to represent UTXO set hash type
-#[derive(Clone, Serialize, PartialEq, Eq, Debug)]
+#[derive(Clone, Serialize, PartialEq, Eq, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TxOutSetHashType {
     HashSerialized2,
@@ -2020,7 +2082,7 @@ pub enum TxOutSetHashType {
 }
 
 /// Used to specify a block hash or a height
-#[derive(Clone, Serialize, PartialEq, Eq, Debug)]
+#[derive(Clone, Serialize, PartialEq, Eq, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum HashOrHeight {
     BlockHash(bitcoin::BlockHash),
@@ -2207,6 +2269,14 @@ pub struct GetIndexInfoResult {
     pub basic_block_filter_index: Option<IndexStatus>,
 }
 
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct GetZmqNotificationsResult {
+    #[serde(rename = "type")]
+    pub notification_type: String,
+    pub address: String,
+    pub hwm: u64,
+}
+
 impl<'a> serde::Serialize for PubKeyOrAddress<'a> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -2235,6 +2305,29 @@ where
         res.push(FromHex::from_hex(&h).map_err(D::Error::custom)?);
     }
     Ok(Some(res))
+}
+
+/// deserialize_bip70_network deserializes a Bitcoin Core network according to BIP70
+/// The accepted input variants are: {"main", "test", "signet", "regtest"}
+fn deserialize_bip70_network<'de, D>(deserializer: D) -> Result<Network, D::Error> 
+where
+    D: serde::Deserializer<'de>,
+{
+    struct NetworkVisitor;
+    impl<'de> serde::de::Visitor<'de> for NetworkVisitor {
+        type Value = Network;
+
+        fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<Self::Value, E> {
+            Network::from_core_arg(s)
+                .map_err(|_| E::invalid_value(serde::de::Unexpected::Str(s), &"bitcoin network encoded as a string"))
+        }
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            write!(formatter, "bitcoin network encoded as a string")
+        }
+    }
+
+    deserializer.deserialize_str(NetworkVisitor)
 }
 
 #[cfg(test)]
