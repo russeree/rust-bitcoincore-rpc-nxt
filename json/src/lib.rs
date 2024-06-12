@@ -1550,7 +1550,7 @@ pub enum GetBlockTemplateModes {
 }
 
 /// Models the result of "getblock "blockhash" ( verbosity=3 )"
-#[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct GetBlockVerboseResult {
     /// The current block hash
     pub hash: bitcoin::BlockHash,
@@ -1833,8 +1833,7 @@ pub struct GetBlockVerboseTransactionResult {
     pub locktime: u32,
     pub vin: Vec<GetRawTransactionResultVin>,
     pub vout: Vec<GetRawTransactionResultVout>,
-    #[serde(with = "bitcoin::amount::serde::as_btc::opt")]
-    pub fee: Option<Amount>,
+    pub fee: Option<u32>,
     #[serde(default, with = "crate::serde_hex")]
     pub hex: Vec<u8>,
 }
