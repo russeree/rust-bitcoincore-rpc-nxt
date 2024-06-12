@@ -29,7 +29,10 @@ use bitcoin::block::Version;
 use bitcoin::consensus::encode;
 use bitcoin::hashes::hex::FromHex;
 use bitcoin::hashes::sha256;
-use bitcoin::{Address, Amount, PrivateKey, PublicKey, SignedAmount, Transaction, ScriptBuf, Script, bip158, bip32};
+use bitcoin::{
+    bip158, bip32, Address, Amount, PrivateKey, PublicKey, Script, ScriptBuf, SignedAmount,
+    Transaction,
+};
 use serde::de::Error as SerdeError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -1546,6 +1549,51 @@ pub enum GetBlockTemplateModes {
     // side.
 }
 
+/// Models the result of "getblock "blockhash" ( verbosity=3 )"
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct GetBlockVerboseResult {
+    /// The current block hash
+    pub hash: bitcoin::BlockHash,
+    /// The number of confirmations, or -1 if the block is not on the main chain
+    pub confirmations: i64,
+    /// The block size
+    pub size: u64,
+    /// The block size excluding witness data
+    pub strippedsize: u64,
+    /// The block weight as defined in BIP 141
+    pub weight: u64,
+    /// The block height or index
+    pub height: u64,
+    /// The block version
+    pub version: u32,
+    /// The block version formatted in hexadecimal
+    #[serde(rename = "version_hex", with = "crate::serde_hex")]
+    pub version_hex: Vec<u8>,
+    /// The merkle root
+    pub merkleroot: bitcoin::hash_types::TxMerkleNode,
+    /// The transaction ids
+    pub tx: Vec<GetblockVerboseTransactionResult>,
+    /// The block time
+    pub time: usize,
+    /// The median block time expressed in UNIX epoch time
+    pub mediantime: Option<usize>,
+    /// The nonce
+    pub nonce: u32,
+    /// The bits
+    pub bits: String,
+    /// The difficulty
+    pub difficulty: u64,
+    /// Expected number of hashes required to produce the chain up to this block
+    #[serde(with = "crate::serde_hex")]
+    pub chainwork: Vec<u8>,
+    /// The number of transactions in the block
+    pub n_tx: usize,
+    /// The hash of the previous block (if available)
+    pub previousblockhash: Option<bitcoin::BlockHash>,
+    /// The hash of the next block (if available)
+    pub nextblockhash: Option<bitcoin::BlockHash>,
+}
+
 /// Models the result of "getblocktemplate"
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct GetBlockTemplateResult {
@@ -1772,6 +1820,23 @@ pub struct DecodeRawTransactionResult {
     pub vout: Vec<GetRawTransactionResultVout>,
 }
 
+/// Model for Getblock tx verbosity 2
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct GetblockVerboseTransactionResult {
+    pub txid: bitcoin::Txid,
+    pub hash: bitcoin::Wtxid,
+    pub size: u32,
+    pub vsize: u32,
+    pub weight: u32,
+    pub version: u32,
+    pub locktime: u32,
+    pub vin: Vec<GetRawTransactionResultVin>,
+    pub vout: Vec<GetRawTransactionResultVout>,
+    pub fee: u32,
+    #[serde(default, with = "crate::serde_hex")]
+    pub hex: Vec<u8>,
+}
+
 /// Models the result of "getchaintips"
 pub type GetChainTipsResult = Vec<GetChainTipsResultTip>;
 
@@ -1876,10 +1941,7 @@ pub struct FundRawTransactionOptions {
     pub include_watching: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lock_unspents: Option<bool>,
-    #[serde(
-        with = "bitcoin::amount::serde::as_btc::opt",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(with = "bitcoin::amount::serde::as_btc::opt", skip_serializing_if = "Option::is_none")]
     pub fee_rate: Option<Amount>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subtract_fee_from_outputs: Option<Vec<u32>>,
