@@ -1587,7 +1587,7 @@ pub struct GetBlockVerboseResult {
     #[serde(with = "crate::serde_hex")]
     pub chainwork: Vec<u8>,
     /// The number of transactions in the block
-    #[serde(rename = "ntx")]
+    #[serde(rename = "nTx")]
     pub n_tx: usize,
     /// The hash of the previous block (if available)
     pub previousblockhash: Option<bitcoin::BlockHash>,
