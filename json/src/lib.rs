@@ -1550,7 +1550,7 @@ pub enum GetBlockTemplateModes {
 }
 
 /// Models the result of "getblock "blockhash" ( verbosity=3 )"
-#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct GetBlockVerboseResult {
     /// The current block hash
     pub hash: bitcoin::BlockHash,
@@ -1582,7 +1582,7 @@ pub struct GetBlockVerboseResult {
     /// The bits
     pub bits: String,
     /// The difficulty
-    pub difficulty: u64,
+    pub difficulty: f64,
     /// Expected number of hashes required to produce the chain up to this block
     #[serde(with = "crate::serde_hex")]
     pub chainwork: Vec<u8>,
