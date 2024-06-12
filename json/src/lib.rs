@@ -1832,7 +1832,7 @@ pub struct GetBlockVerboseTransactionResult {
     pub locktime: u32,
     pub vin: Vec<GetRawTransactionResultVin>,
     pub vout: Vec<GetRawTransactionResultVout>,
-    pub fee: u32,
+    pub fee: Option<u32>,
     #[serde(default, with = "crate::serde_hex")]
     pub hex: Vec<u8>,
 }
