@@ -1567,7 +1567,7 @@ pub struct GetBlockVerboseResult {
     /// The block version
     pub version: u32,
     /// The block version formatted in hexadecimal
-    #[serde(rename = "version_hex", with = "crate::serde_hex")]
+    #[serde(rename = "versionhex", with = "crate::serde_hex")]
     pub version_hex: Vec<u8>,
     /// The merkle root
     pub merkleroot: bitcoin::hash_types::TxMerkleNode,
