@@ -1833,7 +1833,6 @@ pub struct GetBlockVerboseTransactionResult {
     pub locktime: u32,
     pub vin: Vec<GetRawTransactionResultVin>,
     pub vout: Vec<GetRawTransactionResultVout>,
-    #[serde(with = "bitcoin::amount::serde::as_btc::opt", skip_serializing_if = "Option::is_none")]
     #[serde(with = "bitcoin::amount::serde::as_btc::opt")]
     pub fee: Option<Amount>,
     #[serde(default, with = "crate::serde_hex")]
