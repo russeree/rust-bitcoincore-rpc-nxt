@@ -28,11 +28,11 @@ use bitcoin::hashes::hex::FromHex;
 use bitcoin::hashes::Hash;
 use bitcoin::{secp256k1, ScriptBuf, sighash};
 use bitcoin::{
-    transaction, Address, Amount, Network, OutPoint, PrivateKey, Sequence, SignedAmount,
-    Transaction, TxIn, TxOut, Txid, Witness,
+    transaction, Address, Amount, CompressedPublicKey, Network, OutPoint, PrivateKey, Sequence,
+    SignedAmount, Transaction, TxIn, TxOut, Txid, Witness,
 };
 use bitcoincore_rpc::bitcoincore_rpc_json::{
-    GetBlockTemplateModes, GetBlockTemplateRules, ScanTxOutRequest,
+    GetBlockTemplateModes, GetBlockTemplateRules, GetZmqNotificationsResult, ScanTxOutRequest,
 };
 
 lazy_static! {
@@ -226,6 +226,7 @@ fn main() {
     test_add_ban(&cl);
     test_set_network_active(&cl);
     test_get_index_info(&cl);
+    test_get_zmq_notifications(&cl);
     test_stop(cl);
 }
 
@@ -267,7 +268,8 @@ fn test_get_raw_change_address(cl: &Client) {
 fn test_dump_private_key(cl: &Client) {
     let addr = cl.get_new_address(None, Some(json::AddressType::Bech32)).unwrap().assume_checked();
     let sk = cl.dump_private_key(&addr).unwrap();
-    assert_eq!(addr, Address::p2wpkh(&sk.public_key(&SECP), *NET).unwrap());
+    let pk = CompressedPublicKey::from_private_key(&SECP, &sk).unwrap();
+    assert_eq!(addr, Address::p2wpkh(&pk, *NET));
 }
 
 fn test_generate(cl: &Client) {
@@ -570,11 +572,12 @@ fn test_get_block_filter(cl: &Client) {
 
 fn test_sign_raw_transaction_with_send_raw_transaction(cl: &Client) {
     let sk = PrivateKey {
-        network: Network::Regtest,
+        network: Network::Regtest.into(),
         inner: secp256k1::SecretKey::new(&mut secp256k1::rand::thread_rng()),
         compressed: true,
     };
-    let addr = Address::p2wpkh(&sk.public_key(&SECP), Network::Regtest).unwrap();
+    let pk = CompressedPublicKey::from_private_key(&SECP, &sk).unwrap();
+    let addr = Address::p2wpkh(&pk, Network::Regtest);
 
     let options = json::ListUnspentQueryOptions {
         minimum_amount: Some(btc(2)),
@@ -693,7 +696,7 @@ fn test_decode_raw_transaction(cl: &Client) {
 
     let decoded_transaction = cl.decode_raw_transaction(hex, None).unwrap();
 
-    assert_eq!(tx.txid(), decoded_transaction.txid);
+    assert_eq!(tx.compute_txid(), decoded_transaction.txid);
     assert_eq!(500_000, decoded_transaction.locktime);
 
     assert_eq!(decoded_transaction.vin[0].txid.unwrap(), unspent.txid);
@@ -983,7 +986,7 @@ fn test_list_received_by_address(cl: &Client) {
 
 fn test_import_public_key(cl: &Client) {
     let sk = PrivateKey {
-        network: Network::Regtest,
+        network: Network::Regtest.into(),
         inner: secp256k1::SecretKey::new(&mut secp256k1::rand::thread_rng()),
         compressed: true,
     };
@@ -994,7 +997,7 @@ fn test_import_public_key(cl: &Client) {
 
 fn test_import_priv_key(cl: &Client) {
     let sk = PrivateKey {
-        network: Network::Regtest,
+        network: Network::Regtest.into(),
         inner: secp256k1::SecretKey::new(&mut secp256k1::rand::thread_rng()),
         compressed: true,
     };
@@ -1005,7 +1008,7 @@ fn test_import_priv_key(cl: &Client) {
 
 fn test_import_address(cl: &Client) {
     let sk = PrivateKey {
-        network: Network::Regtest,
+        network: Network::Regtest.into(),
         inner: secp256k1::SecretKey::new(&mut secp256k1::rand::thread_rng()),
         compressed: true,
     };
@@ -1017,7 +1020,7 @@ fn test_import_address(cl: &Client) {
 
 fn test_import_address_script(cl: &Client) {
     let sk = PrivateKey {
-        network: Network::Regtest,
+        network: Network::Regtest.into(),
         inner: secp256k1::SecretKey::new(&mut secp256k1::rand::thread_rng()),
         compressed: true,
     };
@@ -1424,6 +1427,36 @@ fn test_get_index_info(cl: &Client) {
         assert!(gii.coinstatsindex.is_none());
         assert!(gii.basic_block_filter_index.is_some());
     }
+}
+
+fn test_get_zmq_notifications(cl: &Client) {
+    let mut zmq_info = cl.get_zmq_notifications().unwrap();
+
+    // it doesn't matter in which order Bitcoin Core returns the result,
+    // but checking it is easier if it has a known order
+
+    // sort_by_key does not allow returning references to parameters of the compare function
+    // (removing the lifetime from the return type mimics this behavior, but we don't want it)
+    fn compare_fn(result: &GetZmqNotificationsResult) -> impl Ord + '_ {
+        (&result.address, &result.notification_type, result.hwm)
+    }
+    zmq_info.sort_by(|a, b| compare_fn(a).cmp(&compare_fn(b)));
+
+    assert!(
+        zmq_info
+            == [
+                GetZmqNotificationsResult {
+                    notification_type: "pubrawblock".to_owned(),
+                    address: "tcp://0.0.0.0:28332".to_owned(),
+                    hwm: 1000
+                },
+                GetZmqNotificationsResult {
+                    notification_type: "pubrawtx".to_owned(),
+                    address: "tcp://0.0.0.0:28333".to_owned(),
+                    hwm: 1000
+                },
+            ]
+    );
 }
 
 fn test_stop(cl: Client) {
