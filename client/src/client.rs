@@ -338,12 +338,16 @@ pub trait RpcApi: Sized {
         deserialize_hex(&hex)
     }
 
+    fn get_block_hex(&self, hash: &bitcoin::BlockHash) -> Result<String> {
+        self.call("getblock", &[into_json(hash)?, 0.into()])
+    }
+
     fn get_block_info(&self, hash: &bitcoin::BlockHash) -> Result<json::GetBlockResult> {
         self.call("getblock", &[into_json(hash)?, 1.into()])
     }
 
-    fn get_block_prevouts(&self, hash: &bitcoin::BlockHash) -> Result<String> {
-        self.call("getblock", &[into_json(hash)?, 3.into()])
+    fn get_block_verbose(&self, hash: &bitcoin::BlockHash) -> Result<json::GetBlockVerboseResult> {
+        self.call("getblock", &[into_json(hash)?, 2.into()])
     }
 
     fn get_block_header(&self, hash: &bitcoin::BlockHash) -> Result<bitcoin::block::Header> {

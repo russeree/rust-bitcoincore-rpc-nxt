@@ -1572,7 +1572,7 @@ pub struct GetBlockVerboseResult {
     /// The merkle root
     pub merkleroot: bitcoin::hash_types::TxMerkleNode,
     /// The transaction ids
-    pub tx: Vec<GetblockVerboseTransactionResult>,
+    pub tx: Vec<GetBlockVerboseTransactionResult>,
     /// The block time
     pub time: usize,
     /// The median block time expressed in UNIX epoch time
@@ -1822,7 +1822,7 @@ pub struct DecodeRawTransactionResult {
 
 /// Model for Getblock tx verbosity 2
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
-pub struct GetblockVerboseTransactionResult {
+pub struct GetBlockVerboseTransactionResult {
     pub txid: bitcoin::Txid,
     pub hash: bitcoin::Wtxid,
     pub size: u32,
