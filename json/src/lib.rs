@@ -1823,7 +1823,6 @@ pub struct DecodeRawTransactionResult {
 
 /// Model for Getblock tx verbosity 2
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
-#[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct GetBlockVerboseTransactionResult {
     pub txid: bitcoin::Txid,
     pub hash: bitcoin::Wtxid,
@@ -1834,7 +1833,8 @@ pub struct GetBlockVerboseTransactionResult {
     pub locktime: u32,
     pub vin: Vec<GetRawTransactionResultVin>,
     pub vout: Vec<GetRawTransactionResultVout>,
-    pub fee: Option<f64>,
+    #[serde(with = "bitcoin::amount::serde::as_btc::opt", skip_serializing_if = "Option::is_none")]
+    pub fee: Option<Amount>,
     #[serde(default, with = "crate::serde_hex")]
     pub hex: Vec<u8>,
 }
