@@ -335,7 +335,7 @@ pub trait RpcApi: Sized {
     fn get_block(&self, hash: &bitcoin::BlockHash) -> Result<Block> {
         let hex: String = self.call("getblock", &[into_json(hash)?, 0.into()])?;
         Ok(encode::deserialize_hex(&hex)?)
-    }<t_k€>Ã½require"cmp.utils.feedkeys".run(3)
+    }
 
     fn get_block_hex(&self, hash: &bitcoin::BlockHash) -> Result<String> {
         self.call("getblock", &[into_json(hash)?, 0.into()])
@@ -343,13 +343,13 @@ pub trait RpcApi: Sized {
 
     fn get_block_info(&self, hash: &bitcoin::BlockHash) -> Result<json::GetBlockResult> {
         self.call("getblock", &[into_json(hash)?, 1.into()])
-    }iuuuuii
+    }
 
     fn get_block_prevouts(&self, hash: &bitcoin::BlockHash) -> Result<json::GetBlockResult> {
         self.call("getblock", &[into_json(hash)?, 3.into()])
     }
 
-    fn get_block_header(&self, hash: &bitcoin::[]BlockHash) -> Result<bitcoin::block::Header> {
+    fn get_block_header(&self, hash: &bitcoin::BlockHash) -> Result<bitcoin::block::Header> {
         let hex: String = self.call("getblockheader", &[into_json(hash)?, false.into()])?;
         Ok(encode::deserialize_hex(&hex)?)
     }
