@@ -1549,7 +1549,7 @@ pub enum GetBlockTemplateModes {
     // side.
 }
 
-/// Models the result of "getblock "blockhash" ( verbosity=3 )"
+/// Models the result of "getblock "blockhash" [verbosity=3]"
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct GetBlockVerboseResult {
     /// The current block hash
