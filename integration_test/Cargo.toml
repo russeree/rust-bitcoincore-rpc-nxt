@@ -5,7 +5,7 @@ authors = ["Steven Roose <steven@stevenroose.org>"]
 edition = "2018"
 
 [dependencies]
-bitcoincore-rpc = { path = "../client" }
+ord-bitcoincore-rpc = { path = "../client" }
 
 bitcoin = { git = "https://github.com/russeree/rust-bitcoin.git", branch = "bitcoin-0.30.1", features = [
     "rand",

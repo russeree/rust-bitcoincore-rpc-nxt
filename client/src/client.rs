@@ -671,10 +671,15 @@ pub trait RpcApi: Sized {
 
     fn import_descriptors(
         &self,
-        req: json::ImportDescriptors,
+        req: Vec<json::ImportDescriptors>,
     ) -> Result<Vec<json::ImportMultiResult>> {
-        let json_request = vec![serde_json::to_value(req)?];
+        let json_request = serde_json::to_value(req)?;
         self.call("importdescriptors", handle_defaults(&mut [json_request.into()], &[null()]))
+    }
+
+    fn list_descriptors(&self, private: Option<bool>) -> Result<json::ListDescriptorsResult> {
+        let mut args = [opt_into_json(private)?];
+        self.call("listdescriptors", handle_defaults(&mut args, &[null()]))
     }
 
     fn set_label(&self, address: &Address, label: &str) -> Result<()> {
